@@ -21,18 +21,18 @@ import time
 
 parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
-parser.add_argument('train_json', metavar='TRAIN',
+parser.add_argument('--train_json', metavar='TRAIN', default='part_A_train.json',
                     help='path to train json')
-parser.add_argument('test_json', metavar='TEST',
+parser.add_argument('--val_json', metavar='TEST', default='part_A_val.json',
                     help='path to test json')
 
-parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=None,type=str,
+parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=None, type=str,
                     help='path to the pretrained model')
 
-parser.add_argument('gpu',metavar='GPU', type=str,
+parser.add_argument('--gpu', metavar='GPU', type=str, default='0',
                     help='GPU id to use.')
 
-parser.add_argument('task',metavar='TASK', type=str,
+parser.add_argument('--task', metavar='TASK', type=str, default='0',
                     help='task id to use.')
 
 def main():
@@ -56,7 +56,7 @@ def main():
     args.print_freq = 30
     with open(args.train_json, 'r') as outfile:        
         train_list = json.load(outfile)
-    with open(args.test_json, 'r') as outfile:       
+    with open(args.val_json, 'r') as outfile:       
         val_list = json.load(outfile)
     
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
