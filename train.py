@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torchvision import datasets, transforms
+from tensorboardX import SummaryWriter
 
 import numpy as np
 import argparse
@@ -29,7 +30,7 @@ parser.add_argument('--val_json', metavar='TEST', default='part_A_val.json',
 parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=None, type=str,
                     help='path to the pretrained model')
 
-parser.add_argument('--gpu', metavar='GPU', type=str, default='0',
+parser.add_argument('--gpu', metavar='GPU', type=str, default='3',
                     help='GPU id to use.')
 
 parser.add_argument('--task', metavar='TASK', type=str, default='0',
@@ -62,6 +63,8 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     torch.cuda.manual_seed(args.seed)
     
+    writer = SummaryWriter()
+    
     model = CSRNet()
     
     model = model.cuda()
@@ -89,8 +92,8 @@ def main():
         
         adjust_learning_rate(optimizer, epoch)
         
-        train(train_list, model, criterion, optimizer, epoch)
-        prec1 = validate(val_list, model, criterion)
+        train(train_list, model, criterion, optimizer, epoch, writer)
+        prec1 = validate(val_list, model, criterion, writer, epoch)
         
         is_best = prec1 < best_prec1
         best_prec1 = min(prec1, best_prec1)
@@ -103,8 +106,12 @@ def main():
             'best_prec1': best_prec1,
             'optimizer' : optimizer.state_dict(),
         }, is_best,args.task)
+        
+    # export scalar data to JSON for external processing
+    writer.export_scalars_to_json("logs/all_scalars.json")
+    writer.close()
 
-def train(train_list, model, criterion, optimizer, epoch):
+def train(train_list, model, criterion, optimizer, epoch, writer):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
@@ -128,6 +135,8 @@ def train(train_list, model, criterion, optimizer, epoch):
     model.train()
     end = time.time()
     
+    train_mae = 0
+    
     for i,(img, target)in enumerate(train_loader):
         data_time.update(time.time() - end)
         
@@ -135,13 +144,11 @@ def train(train_list, model, criterion, optimizer, epoch):
         img = Variable(img)
         output = model(img)
         
-        
-        
+        train_mae += abs(output.data.sum()-target.sum().type(torch.FloatTensor).cuda())
         
         target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
         target = Variable(target)
-        
-        
+             
         loss = criterion(output, target)
         
         losses.update(loss.item(), img.size(0))
@@ -153,6 +160,8 @@ def train(train_list, model, criterion, optimizer, epoch):
         end = time.time()
         
         if i % args.print_freq == 0:
+            writer.add_scalar('learning_rate', args.lr , i + (epoch*len(train_loader)))
+            writer.add_scalar('train_loss', losses.avg , i + (epoch*len(train_loader)))
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
@@ -160,8 +169,12 @@ def train(train_list, model, criterion, optimizer, epoch):
                   .format(
                    epoch, i, len(train_loader), batch_time=batch_time,
                    data_time=data_time, loss=losses))
+                   
+    train_mae = train_mae/len(train_loader)  
+    writer.add_scalar('train_mae', train_mae, epoch)
+    print(' * TRAIN MAE {mae:.3f} '.format(mae=train_mae)) 
     
-def validate(val_list, model, criterion):
+def validate(val_list, model, criterion, writer, epoch):
     print ('begin test')
     test_loader = torch.utils.data.DataLoader(
     dataset.listDataset(val_list,
@@ -183,8 +196,9 @@ def validate(val_list, model, criterion):
         
         mae += abs(output.data.sum()-target.sum().type(torch.FloatTensor).cuda())
         
-    mae = mae/len(test_loader)    
-    print(' * MAE {mae:.3f} '
+    mae = mae/len(test_loader)   
+    writer.add_scalar('val_mae', mae, epoch) 
+    print(' * VAL MAE {mae:.3f} '
               .format(mae=mae))
 
     return mae    
@@ -192,13 +206,11 @@ def validate(val_list, model, criterion):
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     
-    
     args.lr = args.original_lr
     
     for i in range(len(args.steps)):
         
         scale = args.scales[i] if i < len(args.scales) else 1
-        
         
         if epoch >= args.steps[i]:
             args.lr = args.lr * scale
